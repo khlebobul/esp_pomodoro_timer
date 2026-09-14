@@ -45,6 +45,9 @@ static lv_obj_t *s_edge_t;
 static lv_obj_t *s_edge_r;
 static lv_obj_t *s_edge_b;
 static lv_obj_t *s_edge_l;
+static lv_obj_t *s_hint[4];
+static lv_obj_t *s_btn;
+static lv_obj_t *s_btn_text;
 static lv_display_t *s_display;
 static int64_t s_started_us;
 static int s_duration;
@@ -185,16 +188,45 @@ static void set_running(bool running)
     s_running = running;
 }
 
+static void reset_button_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
+        return;
+    }
+    s_duration = 0;
+    s_remaining = 0;
+    s_finished = false;
+    s_running = false;
+}
+
+static void show_place_hint(bool show)
+{
+    static const char *words[] = {"PLACE", "ON", "A", "SIDE"};
+    for (int i = 0; i < 4; ++i) {
+        if (show) {
+            lv_obj_remove_flag(s_hint[i], LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text(s_hint[i], words[i]);
+            lv_obj_align(s_hint[i], LV_ALIGN_CENTER, 0, -30 + i * 20);
+        } else {
+            lv_obj_add_flag(s_hint[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
 static void update_ui(lv_timer_t *timer)
 {
     (void)timer;
     lv_disp_rotation_t rotation = s_rotation;
     const int duration = edge_minutes(&rotation);
     if (duration == 0) {
-        s_running = false;
-        s_finished = false;
-        s_duration = 0;
-        s_remaining = 0;
+        if (s_finished || s_duration == 0) {
+            s_duration = 0;
+            s_remaining = 0;
+            s_finished = false;
+            s_running = false;
+        } else {
+            set_running(false);
+        }
     } else if (rotation != s_rotation) {
         bsp_display_rotate(s_display, rotation);
         s_rotation = rotation;
@@ -225,13 +257,13 @@ static void update_ui(lv_timer_t *timer)
         }
     }
     if (idle) {
-        lv_label_set_text(s_phase, "PLACE ON A SIDE");
-        lv_obj_set_style_text_color(s_phase, lv_color_hex(0xBBBBBB), LV_PART_MAIN);
-        lv_obj_align(s_phase, LV_ALIGN_CENTER, 0, -64);
+        show_place_hint(true);
+        lv_obj_add_flag(s_phase, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_time, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_dur, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_progress, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_pill, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_btn, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(s_edge_t, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(s_edge_r, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(s_edge_b, LV_OBJ_FLAG_HIDDEN);
@@ -251,20 +283,40 @@ static void update_ui(lv_timer_t *timer)
         lv_obj_set_style_transform_pivot_y(s_time, lv_obj_get_height(s_time) / 2, LV_PART_MAIN);
         lv_obj_set_style_text_color(s_time, lv_color_white(), LV_PART_MAIN);
         lv_label_set_text_fmt(s_dur, "%d MIN", s_duration);
+        lv_obj_remove_flag(s_time, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_dur, LV_OBJ_FLAG_HIDDEN);
+        show_place_hint(false);
         if (s_finished) {
+            lv_obj_remove_flag(s_progress, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(s_btn, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(s_pill, LV_OBJ_FLAG_HIDDEN);
             lv_bar_set_value(s_progress, 1000, LV_ANIM_OFF);
             lv_obj_set_style_bg_color(s_pill, lv_color_hex(0x3D0F14), LV_PART_MAIN);
             lv_obj_set_style_text_color(s_pill_text, lv_color_hex(0xFF4252), LV_PART_MAIN);
             lv_label_set_text(s_pill_text, "TIME IS UP");
+            lv_label_set_text(s_phase, "FOCUS");
+            lv_obj_set_style_text_color(s_phase, lv_color_hex(0xFF4252), LV_PART_MAIN);
+        } else if (!s_running) {
+            lv_obj_add_flag(s_progress, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(s_pill, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(s_btn, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_align(s_btn, LV_ALIGN_BOTTOM_MID, 0, -24);
+            lv_obj_center(s_btn_text);
+            lv_label_set_text(s_phase, "PAUSED");
+            lv_obj_set_style_text_color(s_phase, lv_color_hex(0xFFD24D), LV_PART_MAIN);
         } else {
+            lv_obj_remove_flag(s_progress, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(s_btn, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(s_pill, LV_OBJ_FLAG_HIDDEN);
             const uint32_t pct = elapsed <= 0 ? 0U : (uint32_t)((uint64_t)elapsed * 1000 / total);
             lv_bar_set_value(s_progress, pct, LV_ANIM_OFF);
             lv_obj_set_style_bg_color(s_pill, lv_color_hex(0x0E3B26), LV_PART_MAIN);
             lv_obj_set_style_text_color(s_pill_text, lv_color_hex(0x22D27F), LV_PART_MAIN);
             lv_label_set_text(s_pill_text, "RUNNING");
+            lv_label_set_text(s_phase, "FOCUS");
+            lv_obj_set_style_text_color(s_phase, lv_color_hex(0xFF4252), LV_PART_MAIN);
         }
-        lv_label_set_text(s_phase, "FOCUS");
-        lv_obj_set_style_text_color(s_phase, lv_color_hex(0xFF4252), LV_PART_MAIN);
+        lv_obj_remove_flag(s_phase, LV_OBJ_FLAG_HIDDEN);
         lv_obj_align(s_phase, LV_ALIGN_TOP_MID, 0, 40);
         lv_obj_align(s_dur, LV_ALIGN_TOP_MID, 0, 76);
         lv_obj_align(s_time, LV_ALIGN_CENTER, 0, -24);
@@ -273,8 +325,6 @@ static void update_ui(lv_timer_t *timer)
         lv_obj_center(s_pill_text);
         lv_obj_remove_flag(s_time, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(s_dur, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_remove_flag(s_progress, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_remove_flag(s_pill, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_edge_t, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_edge_r, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_edge_b, LV_OBJ_FLAG_HIDDEN);
@@ -297,6 +347,7 @@ static void build_ui(void)
     s_phase = lv_label_create(screen);
     lv_obj_set_style_text_font(s_phase, &lv_font_unscii_16, LV_PART_MAIN);
     lv_obj_set_style_text_color(s_phase, lv_color_hex(0xFF4252), LV_PART_MAIN);
+    lv_obj_set_style_text_align(s_phase, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_label_set_text(s_phase, "FOCUS");
 
     s_dur = lv_label_create(screen);
@@ -357,13 +408,37 @@ static void build_ui(void)
     lv_obj_set_style_text_color(s_edge_l, lv_color_hex(0x666666), LV_PART_MAIN);
     lv_label_set_text_fmt(s_edge_l, "%d", MIN_LEFT);
 
-    lv_label_set_text(s_phase, "PLACE ON A SIDE");
-    lv_obj_set_style_text_color(s_phase, lv_color_hex(0xBBBBBB), LV_PART_MAIN);
-    lv_obj_align(s_phase, LV_ALIGN_CENTER, 0, -64);
+    for (int i = 0; i < 4; ++i) {
+        s_hint[i] = lv_label_create(screen);
+        lv_obj_set_width(s_hint[i], lv_pct(100));
+        lv_obj_set_style_text_font(s_hint[i], &lv_font_unscii_16, LV_PART_MAIN);
+        lv_obj_set_style_text_color(s_hint[i], lv_color_hex(0xBBBBBB), LV_PART_MAIN);
+        lv_obj_set_style_text_align(s_hint[i], LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    }
+
+    s_btn = lv_button_create(screen);
+    lv_obj_set_size(s_btn, 328, 60);
+    lv_obj_set_style_radius(s_btn, 6, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_btn, lv_color_hex(0x3B3408), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_btn, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_btn, lv_color_hex(0xFFD24D), LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_btn, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(s_btn, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_add_flag(s_btn, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(s_btn, reset_button_cb, LV_EVENT_CLICKED, NULL);
+
+    s_btn_text = lv_label_create(s_btn);
+    lv_obj_set_style_text_font(s_btn_text, &lv_font_unscii_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_btn_text, lv_color_hex(0xFFD24D), LV_PART_MAIN);
+    lv_label_set_text(s_btn_text, "RESET");
+
+    show_place_hint(true);
+    lv_obj_add_flag(s_phase, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_time, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_dur, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_progress, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_pill, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_btn, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void release_v2_panel_reset(void)

@@ -13,8 +13,9 @@ Firmware for the Waveshare ESP32-S3-Touch-AMOLED-1.8 with an OLED display and a 
   - **Right** edge → 10 minutes
   - **Bottom** edge → 5 minutes
   - **Left** edge → 60 minutes
+- Lay it flat **screen-up** while the timer is running to pause it (pill shows `PAUSED`) and a **RESET** button appears; put it back on the same edge to resume, or tap **RESET** to cancel the timer back to idle.
 - Each edge flips the screen so the UI stays readable.
-- When the timer expires it plays a beep and shows `TIME IS UP`.
+- When the timer expires it plays a soft two-note chime and shows `TIME IS UP`. Laying it flat after that returns to idle.
 - When the device is lying flat the timer shows the idle screen: a `PLACE ON A SIDE` hint plus grey labels on each side with the matching minutes, so you always know which edge gives which time.
 
 ## Setting the times
@@ -54,3 +55,19 @@ Use the name `ls` printed, not `usbmodemXXXX`. If nothing appears, reconnect the
 - Waveshare 1.8" AMOLED Touch (368x448)
 - QMI8658 6-axis IMU on the internal I2C bus, used for edge/orientation detection
 - ES8311 codec + speaker for the completion beep
+
+## Enclosure
+
+The enclosure model ([build123d_models](https://github.com/khlebobul/build123d_models)) is attached as a **git submodule** at `enclosure/`, sparse-checked out to a single path so only `pomodoro_timer_enclosure/` is materialized:
+
+- `pomodoro_timer_enclosure.py` — the parametric build123d script
+- `buttons/` and `no_buttons/` — with/without side button cutouts, each split into `labeled/` (debossed edge labels for the idle screen) and `unlabeled/`
+- `body` and `lid` parts in STL/STEP; `buttons.png` / `no_buttons.png` previews
+
+After cloning this repo, fetch it with:
+
+```sh
+git submodule update --init --recursive
+git -C enclosure sparse-checkout init --cone
+git -C enclosure sparse-checkout set pomodoro_timer_enclosure
+```
