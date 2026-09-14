@@ -1,0 +1,3 @@
+[submodule "enclosure"]
+	path = enclosure
+	url = https://github.com/khlebobul/build123d_models.git
