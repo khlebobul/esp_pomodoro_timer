@@ -58,7 +58,7 @@ Use the name `ls` printed, not `usbmodemXXXX`. If nothing appears, reconnect the
 
 ## Enclosure
 
-The enclosure model ([build123d_models](https://github.com/khlebobul/build123d_models)) is attached as a **git submodule** at `enclosure/`, sparse-checked out to a single path so only `pomodoro_timer_enclosure/` is materialized:
+The enclosure model ([build123d_models, pomodoro_timer_enclosure](https://github.com/khlebobul/build123d_models/tree/a051084d6fe956c4d0c5485d98b21841a44b6e1f/pomodoro_timer_enclosure)) is attached as a **git submodule** at `enclosure/`, pinned to commit `a051084d` and sparse-checked out so only `pomodoro_timer_enclosure/` is materialized:
 
 - `pomodoro_timer_enclosure.py` — the parametric build123d script
 - `buttons/` and `no_buttons/` — with/without side button cutouts, each split into `labeled/` (debossed edge labels for the idle screen) and `unlabeled/`
