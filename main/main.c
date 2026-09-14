@@ -27,12 +27,24 @@
 #define QMI_AX_L 0x35
 #define EDGE_G 0.70f
 #define SAMPLE_RATE 16000
-#define BEEP_SAMPLES 1600
+
+#define MIN_TOP 30
+#define MIN_RIGHT 10
+#define MIN_BOTTOM 5
+#define MIN_LEFT 60
 
 static const char *TAG = "pomodoro";
 static i2c_master_dev_handle_t s_imu;
+static lv_obj_t *s_phase;
+static lv_obj_t *s_dur;
 static lv_obj_t *s_time;
-static lv_obj_t *s_state;
+static lv_obj_t *s_progress;
+static lv_obj_t *s_pill;
+static lv_obj_t *s_pill_text;
+static lv_obj_t *s_edge_t;
+static lv_obj_t *s_edge_r;
+static lv_obj_t *s_edge_b;
+static lv_obj_t *s_edge_l;
 static lv_display_t *s_display;
 static int64_t s_started_us;
 static int s_duration;
@@ -41,7 +53,6 @@ static bool s_running;
 static bool s_finished;
 static lv_disp_rotation_t s_rotation = LV_DISPLAY_ROTATION_0;
 static esp_codec_dev_handle_t s_speaker;
-static int16_t s_beep[BEEP_SAMPLES];
 
 static void speaker_init(void)
 {
@@ -74,17 +85,37 @@ static void speaker_init(void)
     esp_codec_dev_set_out_vol(s_speaker, 90);
 }
 
+static void play_note(float freq, float seconds)
+{
+    const int total = (int)(seconds * SAMPLE_RATE);
+    const float tau = 0.20f;
+    int16_t chunk[512];
+    for (int pos = 0; pos < total;) {
+        int cnt = total - pos;
+        if (cnt > 512) {
+            cnt = 512;
+        }
+        for (int i = 0; i < cnt; ++i) {
+            const int n = pos + i;
+            const float t = (float)n / SAMPLE_RATE;
+            const float decay = expf(-t / tau);
+            const float attack = fminf(1.0f, t / 0.002f);
+            float v = sinf(2.f * 3.14159265f * freq * t);
+            v += 0.40f * sinf(2.f * 3.14159265f * freq * 2.f * t);
+            v += 0.15f * sinf(2.f * 3.14159265f * freq * 3.f * t);
+            const float tail = total - n < 40 ? (float)(total - n) / 40.f : 1.f;
+            chunk[i] = (int16_t)(v * 3000.f * decay * attack * tail);
+        }
+        esp_codec_dev_write(s_speaker, chunk, cnt * (int)sizeof(int16_t));
+        pos += cnt;
+    }
+    vTaskDelay(pdMS_TO_TICKS(90));
+}
+
 static void play_done(void)
 {
-    for (int i = 0; i < BEEP_SAMPLES; ++i) {
-        const float fade = i < 160 ? (float)i / 160.f
-                                    : (i > 1440 ? (float)(BEEP_SAMPLES - i) / 160.f : 1.f);
-        s_beep[i] = (int16_t)(sinf(2.f * 3.14159265f * 660.f * i / SAMPLE_RATE) * 4200.f * fade);
-    }
-    for (int i = 0; i < 3; ++i) {
-        esp_codec_dev_write(s_speaker, s_beep, sizeof(s_beep));
-        vTaskDelay(pdMS_TO_TICKS(140));
-    }
+    play_note(1046.5f, 0.45f);
+    play_note(784.0f, 0.80f);
 }
 
 static esp_err_t imu_write(uint8_t reg, uint8_t value)
@@ -121,7 +152,7 @@ static bool imu_init(void)
     return true;
 }
 
-static int edge_seconds(lv_disp_rotation_t *rotation)
+static int edge_minutes(lv_disp_rotation_t *rotation)
 {
     uint8_t raw[6];
     if (i2c_master_transmit_receive(s_imu, (uint8_t[]){QMI_AX_L}, 1, raw, sizeof(raw), 50) != ESP_OK) {
@@ -135,10 +166,10 @@ static int edge_seconds(lv_disp_rotation_t *rotation)
     }
     if (abs(x) > abs(y)) {
         *rotation = x > 0 ? LV_DISPLAY_ROTATION_0 : LV_DISPLAY_ROTATION_180;
-        return x > 0 ? 5 : 10;
+        return x > 0 ? MIN_BOTTOM : MIN_TOP;
     }
     *rotation = y > 0 ? LV_DISPLAY_ROTATION_270 : LV_DISPLAY_ROTATION_90;
-    return y > 0 ? 30 : 60;
+    return y > 0 ? MIN_LEFT : MIN_RIGHT;
 }
 
 static void set_running(bool running)
@@ -158,7 +189,7 @@ static void update_ui(lv_timer_t *timer)
 {
     (void)timer;
     lv_disp_rotation_t rotation = s_rotation;
-    const int duration = edge_seconds(&rotation);
+    const int duration = edge_minutes(&rotation);
     if (duration == 0) {
         s_running = false;
         s_finished = false;
@@ -170,7 +201,7 @@ static void update_ui(lv_timer_t *timer)
     }
     if (duration != 0 && duration != s_duration) {
         s_duration = duration;
-        s_remaining = duration;
+        s_remaining = duration * 60;
         s_started_us = esp_timer_get_time();
         s_finished = false;
     }
@@ -186,19 +217,68 @@ static void update_ui(lv_timer_t *timer)
         s_running = false;
         play_done();
     }
-    char text[16];
-    snprintf(text, sizeof(text), "%02d:%02d", remaining / 60, remaining % 60);
-    lv_label_set_text(s_time, text);
-    lv_obj_align(s_time, LV_ALIGN_CENTER, 0, 8);
-    if (s_duration == 0) {
-        lv_label_set_text(s_state, "PLACE ON EDGE");
-        lv_label_set_text(s_time, "--:--");
-    } else if (s_finished) {
-        lv_label_set_text(s_state, "TIME IS UP");
-    } else if (s_running) {
-        lv_label_set_text_fmt(s_state, "%d SEC", s_duration);
+    const bool idle = (s_duration == 0);
+    if (idle) {
+        if (s_rotation != LV_DISPLAY_ROTATION_0) {
+            bsp_display_rotate(s_display, LV_DISPLAY_ROTATION_0);
+            s_rotation = LV_DISPLAY_ROTATION_0;
+        }
+    }
+    if (idle) {
+        lv_label_set_text(s_phase, "PLACE ON A SIDE");
+        lv_obj_set_style_text_color(s_phase, lv_color_hex(0xBBBBBB), LV_PART_MAIN);
+        lv_obj_align(s_phase, LV_ALIGN_CENTER, 0, -64);
+        lv_obj_add_flag(s_time, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_dur, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_progress, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_pill, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_edge_t, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_edge_r, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_edge_b, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_edge_l, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_align(s_edge_t, LV_ALIGN_TOP_MID, 0, 14);
+        lv_obj_align(s_edge_r, LV_ALIGN_RIGHT_MID, -14, 0);
+        lv_obj_align(s_edge_b, LV_ALIGN_BOTTOM_MID, 0, -14);
+        lv_obj_align(s_edge_l, LV_ALIGN_LEFT_MID, 14, 0);
     } else {
-        lv_label_set_text_fmt(s_state, "%d SEC", s_duration);
+        const int total = s_duration * 60;
+        const int elapsed = total - remaining;
+        char text[16];
+        snprintf(text, sizeof(text), "%02d:%02d", remaining / 60, remaining % 60);
+        lv_label_set_text(s_time, text);
+        lv_obj_update_layout(s_time);
+        lv_obj_set_style_transform_pivot_x(s_time, lv_obj_get_width(s_time) / 2, LV_PART_MAIN);
+        lv_obj_set_style_transform_pivot_y(s_time, lv_obj_get_height(s_time) / 2, LV_PART_MAIN);
+        lv_obj_set_style_text_color(s_time, lv_color_white(), LV_PART_MAIN);
+        lv_label_set_text_fmt(s_dur, "%d MIN", s_duration);
+        if (s_finished) {
+            lv_bar_set_value(s_progress, 1000, LV_ANIM_OFF);
+            lv_obj_set_style_bg_color(s_pill, lv_color_hex(0x3D0F14), LV_PART_MAIN);
+            lv_obj_set_style_text_color(s_pill_text, lv_color_hex(0xFF4252), LV_PART_MAIN);
+            lv_label_set_text(s_pill_text, "TIME IS UP");
+        } else {
+            const uint32_t pct = elapsed <= 0 ? 0U : (uint32_t)((uint64_t)elapsed * 1000 / total);
+            lv_bar_set_value(s_progress, pct, LV_ANIM_OFF);
+            lv_obj_set_style_bg_color(s_pill, lv_color_hex(0x0E3B26), LV_PART_MAIN);
+            lv_obj_set_style_text_color(s_pill_text, lv_color_hex(0x22D27F), LV_PART_MAIN);
+            lv_label_set_text(s_pill_text, "RUNNING");
+        }
+        lv_label_set_text(s_phase, "FOCUS");
+        lv_obj_set_style_text_color(s_phase, lv_color_hex(0xFF4252), LV_PART_MAIN);
+        lv_obj_align(s_phase, LV_ALIGN_TOP_MID, 0, 40);
+        lv_obj_align(s_dur, LV_ALIGN_TOP_MID, 0, 76);
+        lv_obj_align(s_time, LV_ALIGN_CENTER, 0, -24);
+        lv_obj_align(s_progress, LV_ALIGN_BOTTOM_MID, 0, -78);
+        lv_obj_align(s_pill, LV_ALIGN_BOTTOM_MID, 0, -28);
+        lv_obj_center(s_pill_text);
+        lv_obj_remove_flag(s_time, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_dur, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_progress, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_pill, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_edge_t, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_edge_r, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_edge_b, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_edge_l, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -210,19 +290,80 @@ static void orientation_self_check(void)
 static void build_ui(void)
 {
     lv_obj_t *screen = lv_screen_active();
-    lv_obj_set_style_bg_color(screen, lv_color_hex(0x0C0B09), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000), LV_PART_MAIN);
     lv_obj_set_style_pad_all(screen, 0, LV_PART_MAIN);
     lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
 
-    s_state = lv_label_create(screen);
-    lv_obj_set_style_text_font(s_state, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_state, lv_color_white(), LV_PART_MAIN);
-    lv_obj_align(s_state, LV_ALIGN_TOP_MID, 0, 60);
+    s_phase = lv_label_create(screen);
+    lv_obj_set_style_text_font(s_phase, &lv_font_unscii_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_phase, lv_color_hex(0xFF4252), LV_PART_MAIN);
+    lv_label_set_text(s_phase, "FOCUS");
+
+    s_dur = lv_label_create(screen);
+    lv_obj_set_style_text_font(s_dur, &lv_font_unscii_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_dur, lv_color_hex(0x888888), LV_PART_MAIN);
+    lv_label_set_text(s_dur, "");
 
     s_time = lv_label_create(screen);
-    lv_obj_set_style_text_font(s_time, &lv_font_montserrat_48, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_time, lv_color_white(), LV_PART_MAIN);
-    lv_obj_align(s_time, LV_ALIGN_CENTER, 0, 8);
+    lv_obj_set_style_text_font(s_time, &lv_font_unscii_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_time, lv_color_hex(0x555555), LV_PART_MAIN);
+    lv_obj_set_style_transform_scale_x(s_time, 768, LV_PART_MAIN);
+    lv_obj_set_style_transform_scale_y(s_time, 768, LV_PART_MAIN);
+    lv_label_set_text(s_time, "--:--");
+    lv_obj_update_layout(s_time);
+    lv_obj_set_style_transform_pivot_x(s_time, lv_obj_get_width(s_time) / 2, LV_PART_MAIN);
+    lv_obj_set_style_transform_pivot_y(s_time, lv_obj_get_height(s_time) / 2, LV_PART_MAIN);
+
+    s_progress = lv_bar_create(screen);
+    lv_obj_set_size(s_progress, 300, 10);
+    lv_obj_remove_flag(s_progress, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_radius(s_progress, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_progress, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_progress, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_progress, lv_color_hex(0xFF4252), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(s_progress, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_bar_set_range(s_progress, 0, 1000);
+
+    s_pill = lv_obj_create(screen);
+    lv_obj_remove_flag(s_pill, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(s_pill, 150, 36);
+    lv_obj_set_style_radius(s_pill, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_pill, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_pill, lv_color_hex(0x1A1A1A), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_pill, LV_OPA_COVER, LV_PART_MAIN);
+
+    s_pill_text = lv_label_create(s_pill);
+    lv_obj_set_style_text_font(s_pill_text, &lv_font_unscii_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_pill_text, lv_color_hex(0xAAAAAA), LV_PART_MAIN);
+    lv_label_set_text(s_pill_text, "READY");
+
+    s_edge_t = lv_label_create(screen);
+    lv_obj_set_style_text_font(s_edge_t, &lv_font_unscii_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_edge_t, lv_color_hex(0x666666), LV_PART_MAIN);
+    lv_label_set_text_fmt(s_edge_t, "%d", MIN_TOP);
+
+    s_edge_r = lv_label_create(screen);
+    lv_obj_set_style_text_font(s_edge_r, &lv_font_unscii_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_edge_r, lv_color_hex(0x666666), LV_PART_MAIN);
+    lv_label_set_text_fmt(s_edge_r, "%d", MIN_RIGHT);
+
+    s_edge_b = lv_label_create(screen);
+    lv_obj_set_style_text_font(s_edge_b, &lv_font_unscii_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_edge_b, lv_color_hex(0x666666), LV_PART_MAIN);
+    lv_label_set_text_fmt(s_edge_b, "%d", MIN_BOTTOM);
+
+    s_edge_l = lv_label_create(screen);
+    lv_obj_set_style_text_font(s_edge_l, &lv_font_unscii_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_edge_l, lv_color_hex(0x666666), LV_PART_MAIN);
+    lv_label_set_text_fmt(s_edge_l, "%d", MIN_LEFT);
+
+    lv_label_set_text(s_phase, "PLACE ON A SIDE");
+    lv_obj_set_style_text_color(s_phase, lv_color_hex(0xBBBBBB), LV_PART_MAIN);
+    lv_obj_align(s_phase, LV_ALIGN_CENTER, 0, -64);
+    lv_obj_add_flag(s_time, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_dur, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_progress, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_pill, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void release_v2_panel_reset(void)

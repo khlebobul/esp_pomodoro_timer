@@ -1,11 +1,44 @@
 # Pomodoro timer
 
-Waveshare ESP32-S3-Touch-AMOLED-1.8 firmware controlled by orientation.
+Firmware for the Waveshare ESP32-S3-Touch-AMOLED-1.8 with an OLED display and a QMI8658 accelerometer. The UI is a retro pixel look (LVGL `unscii_16`) inspired by the [app-pixels pomodoro](https://github.com/app-pixels/pomodoro) — one focus phase, no work/break cycles.
 
-- Put it on one of four side edges to select and start a 5, 10, 30, or 60-minute timer.
-- Set it nearly flat to pause; small tilts keep current timer running.
-- Turn it to another edge to restart with that edge's duration.
-- The UI rotates with each selected edge. Touch **Reset** to restart current timer.
+## Demo
+
+// TODO
+
+## How it works
+
+- Stand the device on **one of the four side edges** to select a duration and start the timer immediately.
+  - **Top** edge → 30 minutes
+  - **Right** edge → 10 minutes
+  - **Bottom** edge → 5 minutes
+  - **Left** edge → 60 minutes
+- Each edge flips the screen so the UI stays readable.
+- When the timer expires it plays a beep and shows `TIME IS UP`.
+- When the device is lying flat the timer shows the idle screen: a `PLACE ON A SIDE` hint plus grey labels on each side with the matching minutes, so you always know which edge gives which time.
+
+## Setting the times
+
+Durations (in minutes) live in a single set of constants at the top of `main/main.c`:
+
+```c
+#define MIN_TOP    30
+#define MIN_RIGHT  10
+#define MIN_BOTTOM  5
+#define MIN_LEFT   60
+```
+
+Both the side labels on the idle screen and the timer itself read from these constants, so you only need to change one number per side.
+
+## Flash
+
+Find the serial port first. `XXXX` is not a path — the number changes each time you plug the board in:
+
+```sh
+ls /dev/cu.usbmodem*
+```
+
+Then:
 
 ```sh
 . ~/esp/esp-idf/export.sh
@@ -13,3 +46,11 @@ idf.py set-target esp32s3
 idf.py build
 idf.py -p /dev/cu.usbmodemXXXX flash
 ```
+
+Use the name `ls` printed, not `usbmodemXXXX`. If nothing appears, reconnect the data cable and try BOOT + RESET.
+
+## Hardware
+
+- Waveshare 1.8" AMOLED Touch (368x448)
+- QMI8658 6-axis IMU on the internal I2C bus, used for edge/orientation detection
+- ES8311 codec + speaker for the completion beep
