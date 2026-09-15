@@ -58,7 +58,13 @@ Use the name `ls` printed, not `usbmodemXXXX`. If nothing appears, reconnect the
 
 ## Enclosure
 
-The enclosure model ([build123d_models, pomodoro_timer_enclosure](https://github.com/khlebobul/build123d_models/tree/a051084d6fe956c4d0c5485d98b21841a44b6e1f/pomodoro_timer_enclosure)) is attached as a **git submodule** at `enclosure/`, pinned to commit `a051084d` and sparse-checked out so only `pomodoro_timer_enclosure/` is materialized:
+<p align="center">
+  <a href="https://makerworld.com/en/models/3306634-pomodoro-timer-enclosure-for-esp32-s3-1-8-inch#profileId-3753456"><img src="assets/maker_world_logo.png" height="38"></a>
+  &nbsp;&nbsp;
+  <a href="https://www.printables.com/model/1842276-pomodoro-timer-enclosure-for-esp32-s3-touch-amoled"><img src="assets/printables_logo.png" height="38"></a>
+</p>
+
+The enclosure model ([build123d_models, pomodoro_timer_enclosure](https://github.com/khlebobul/build123d_models/tree/791a3aecf7db6a890aef07ff845c34dc23612635/pomodoro_timer_enclosure)) is attached as a **git submodule** at `enclosure/`, pinned to commit `791a3ae` and sparse-checked out so only `pomodoro_timer_enclosure/` is materialized:
 
 - `pomodoro_timer_enclosure.py` — the parametric build123d script
 - `buttons/` and `no_buttons/` — with/without side button cutouts, each split into `labeled/` (debossed edge labels for the idle screen) and `unlabeled/`
