@@ -4,7 +4,7 @@ Firmware for the Waveshare ESP32-S3-Touch-AMOLED-1.8 with an OLED display and a 
 
 ## Demo
 
-// TODO
+https://github.com/user-attachments/assets/1864e1b5-8695-4de1-a44b-2ca849b08e9e
 
 ## How it works
 
